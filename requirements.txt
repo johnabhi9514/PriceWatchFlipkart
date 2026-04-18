@@ -1,8 +1,6 @@
 # PriceWatch — requirements
-# Install: pip install -r requirements.txt
-# Then:    playwright install chromium && playwright install-deps
 
-# Web scraping (real browser — handles Flipkart anti-bot)
+# Web scraping
 playwright==1.44.0
 beautifulsoup4==4.14.3
 lxml==6.0.2
@@ -10,7 +8,7 @@ lxml==6.0.2
 # UI
 streamlit==1.56.0
 
-# Scheduling (auto price checks every 24h)
+# Scheduling
 APScheduler==3.11.2
 
 # Data display
