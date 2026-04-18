@@ -1,18 +1,10 @@
 # PriceWatch — requirements
+# Playwright 1.51+ supports Python 3.14 (fixes greenlet build error)
 
-# Web scraping
-playwright==1.44.0
+playwright==1.51.0
 beautifulsoup4==4.14.3
 lxml==6.0.2
-
-# UI
 streamlit==1.56.0
-
-# Scheduling
 APScheduler==3.11.2
-
-# Data display
 pandas==3.0.1
-
-# Environment variables
 python-dotenv==1.2.2

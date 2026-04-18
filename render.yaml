@@ -3,7 +3,6 @@ services:
     name: PriceWatchFlipkart
     runtime: python
     plan: free
-    pythonVersion: "3.11.9"
 
     buildCommand: pip install -r requirements.txt && playwright install chromium
 
