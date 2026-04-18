@@ -84,31 +84,25 @@ class LookAgent:
 
         logger.info(f"LookAgent: itm_id={itm_id} pid={pid_id}")
 
-        # CONFIRMED from screenshot:
-        # API: Real-Time Flipkart Data (ayushsomanime)
-        # Endpoint: GET "Get Single Product Data"
-        # Response fields: price (int), mrp (int), title, url, highlights
-        # Host will be: real-time-flipkart-data.p.rapidapi.com (without "2")
+        # Real-Time Flipkart Data API by ayushsomanime
+        # From screenshot: has "Get Single Product Data" endpoint
+        # Trying all possible path + param combinations
+        best_id = pid_id or itm_id  # prefer uppercase pid like MOBH8K8UZPUKTTXK
+        host = "real-time-flipkart-data.p.rapidapi.com"
+        host2 = "real-time-flipkart-data2.p.rapidapi.com"
+
         calls = [
-            # Primary: Get Single Product Data by pid
-            ("https://real-time-flipkart-data.p.rapidapi.com/product",
-             "real-time-flipkart-data.p.rapidapi.com",
-             {"pid": pid_id or itm_id}),
-
-            # Try with itemId format
-            ("https://real-time-flipkart-data.p.rapidapi.com/product",
-             "real-time-flipkart-data.p.rapidapi.com",
-             {"pid": itm_id}),
-
-            # Try with url parameter
-            ("https://real-time-flipkart-data.p.rapidapi.com/product",
-             "real-time-flipkart-data.p.rapidapi.com",
-             {"url": url}),
-
-            # Also try data2 variant
-            ("https://real-time-flipkart-data2.p.rapidapi.com/product",
-             "real-time-flipkart-data2.p.rapidapi.com",
-             {"pid": pid_id or itm_id}),
+            # Most likely correct endpoint paths
+            (f"https://{host}/product",           host,  {"pid": best_id}),
+            (f"https://{host}/product",           host,  {"url": url}),
+            (f"https://{host}/product-details",   host,  {"pid": best_id}),
+            (f"https://{host}/product-details",   host,  {"url": url}),
+            (f"https://{host}/get-product",       host,  {"pid": best_id}),
+            (f"https://{host}/single-product",    host,  {"pid": best_id}),
+            # data2 variants
+            (f"https://{host2}/product",          host2, {"pid": best_id}),
+            (f"https://{host2}/product",          host2, {"url": url}),
+            (f"https://{host2}/product-details",  host2, {"pid": best_id}),
         ]
 
         for api_url, host, params in calls:
