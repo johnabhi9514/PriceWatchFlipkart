@@ -66,49 +66,94 @@ class LookAgent:
 
     def _fetch_via_rapidapi(self, url: str) -> dict | None:
         """
-        Fetch via RapidAPI Flipkart endpoint.
-        RapidAPI uses residential IPs so Flipkart doesn't block it.
-
-        Free tier: 100 requests/month (enough for tracking ~3 products daily)
+        Fetch via RapidAPI Flipkart endpoints.
+        Tries multiple endpoints with both ID formats.
         """
-        # Extract product ID from URL
-        # URL format: /product-name/p/ITEM_ID?...
-        pid_match = re.search(r'/p/([A-Z0-9]+)', url)
-        if not pid_match:
+        # Flipkart has two product ID formats in URLs:
+        # 1. itm_id from /p/itm7e75db4f27bd5  (starts with itm, lowercase)
+        # 2. pid   from ?pid=MOBH4DQFNXH8SZ9D  (uppercase, in query params)
+        itm_match = re.search(r'/p/([A-Za-z0-9]+)', url)
+        pid_match  = re.search(r'[?&]pid=([A-Z0-9]+)', url)
+
+        itm_id = itm_match.group(1) if itm_match else None
+        pid_id = pid_match.group(1)  if pid_match  else None
+
+        if not itm_id and not pid_id:
             logger.warning("LookAgent: could not extract product ID from URL")
             return None
 
-        product_id = pid_match.group(1)
+        logger.info(f"LookAgent: itm_id={itm_id} pid={pid_id}")
 
-        try:
-            response = requests.get(
-                "https://flipkart-product-search.p.rapidapi.com/product",
-                headers={
-                    "X-RapidAPI-Key": self.rapidapi_key,
-                    "X-RapidAPI-Host": "flipkart-product-search.p.rapidapi.com",
-                },
-                params={"pid": product_id},
-                timeout=15,
-            )
+        # CONFIRMED from screenshot:
+        # API: Real-Time Flipkart Data (ayushsomanime)
+        # Endpoint: GET "Get Single Product Data"
+        # Response fields: price (int), mrp (int), title, url, highlights
+        # Host will be: real-time-flipkart-data.p.rapidapi.com (without "2")
+        calls = [
+            # Primary: Get Single Product Data by pid
+            ("https://real-time-flipkart-data.p.rapidapi.com/product",
+             "real-time-flipkart-data.p.rapidapi.com",
+             {"pid": pid_id or itm_id}),
 
-            if response.status_code == 200:
-                data = response.json()
-                price_str = str(data.get("price", "") or data.get("selling_price", ""))
-                price_clean = re.sub(r"[^\d.]", "", price_str)
-                name = data.get("name", "") or data.get("title", "Unknown Product")
+            # Try with itemId format
+            ("https://real-time-flipkart-data.p.rapidapi.com/product",
+             "real-time-flipkart-data.p.rapidapi.com",
+             {"pid": itm_id}),
 
-                if price_clean:
-                    price = float(price_clean)
-                    if price > 100:
-                        logger.info(f"LookAgent: RapidAPI ✅ '{name[:50]}' → ₹{price:,.0f}")
-                        return {"name": name[:150], "price": price, "url": url}
+            # Try with url parameter
+            ("https://real-time-flipkart-data.p.rapidapi.com/product",
+             "real-time-flipkart-data.p.rapidapi.com",
+             {"url": url}),
 
-            logger.warning(f"LookAgent: RapidAPI returned {response.status_code}")
-            return None
+            # Also try data2 variant
+            ("https://real-time-flipkart-data2.p.rapidapi.com/product",
+             "real-time-flipkart-data2.p.rapidapi.com",
+             {"pid": pid_id or itm_id}),
+        ]
 
-        except Exception as e:
-            logger.error(f"LookAgent: RapidAPI error: {e}")
-            return None
+        for api_url, host, params in calls:
+            # Skip calls where param value is None
+            if None in params.values():
+                continue
+            try:
+                response = requests.get(
+                    api_url,
+                    headers={
+                        "X-RapidAPI-Key": self.rapidapi_key,
+                        "X-RapidAPI-Host": host,
+                    },
+                    params=params,
+                    timeout=15,
+                )
+                logger.info(f"LookAgent: {host} → {response.status_code}")
+
+                if response.status_code == 200:
+                    data = response.json()
+                    price_str = str(
+                        data.get("price") or data.get("selling_price") or
+                        data.get("discounted_price") or data.get("current_price") or
+                        data.get("mrp") or ""
+                    )
+                    price_clean = re.sub(r"[^\d.]", "", price_str)
+                    name = str(
+                        data.get("name") or data.get("title") or
+                        data.get("product_name") or "Unknown Product"
+                    )
+                    if price_clean:
+                        price = float(price_clean)
+                        if price > 100:
+                            logger.info(f"LookAgent: RapidAPI ✅ '{name[:50]}' → ₹{price:,.0f}")
+                            return {"name": name[:150], "price": price, "url": url}
+                    logger.warning(f"LookAgent: no price in response: {str(data)[:150]}")
+
+                elif response.status_code == 403:
+                    logger.warning(f"LookAgent: not subscribed to {host} — skipping")
+
+            except Exception as e:
+                logger.warning(f"LookAgent: {host} error: {e}")
+
+        logger.warning("LookAgent: all RapidAPI calls failed")
+        return None
 
     def _fetch_direct(self, url: str) -> dict | None:
         """
