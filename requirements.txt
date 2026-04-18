@@ -1,6 +1,6 @@
 # PriceWatch — requirements
 # Install: pip install -r requirements.txt
-# Then:    playwright install chromium
+# Then:    playwright install chromium && playwright install-deps
 
 # Web scraping (real browser — handles Flipkart anti-bot)
 playwright==1.44.0
