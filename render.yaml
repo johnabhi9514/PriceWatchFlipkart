@@ -1,0 +1,38 @@
+# render.yaml
+# ===========
+# One-click deployment configuration for Render.com
+# Render reads this file automatically when you connect your GitHub repo
+#
+# HOW TO USE:
+#   1. Push this file to GitHub with your code
+#   2. Go to render.com → New → Web Service
+#   3. Connect your GitHub repo
+#   4. Render auto-detects this file and fills in all settings
+#   5. Just add your environment variables and click Deploy
+
+services:
+  - type: web
+    name: PriceWatchFlipkart
+    runtime: python
+    plan: free
+
+    # Install dependencies + Playwright browser
+    buildCommand: |
+      pip install -r requirements.txt
+      playwright install chromium
+      playwright install-deps
+
+    # Start the Streamlit app
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+
+    # Environment variables
+    # Add SMTP_USER and SMTP_PASS in Render dashboard (keep them secret)
+    envVars:
+      - key: DB_PATH
+        value: /tmp/PriceWatchFlipkart.db
+      - key: SMTP_HOST
+        value: smtp.gmail.com
+      - key: SMTP_USER
+        sync: false   # Set this in Render dashboard
+      - key: SMTP_PASS
+        sync: false   # Set this in Render dashboard
