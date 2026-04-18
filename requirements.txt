@@ -1,7 +1,7 @@
 # PriceWatch — requirements
-# Playwright 1.51+ supports Python 3.14 (fixes greenlet build error)
+# No Playwright needed — uses requests which works on all cloud platforms
 
-playwright==1.51.0
+requests==2.33.0
 beautifulsoup4==4.14.3
 lxml==6.0.2
 streamlit==1.56.0

@@ -4,13 +4,11 @@ services:
     runtime: python
     plan: free
 
-    buildCommand: pip install -r requirements.txt && PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright python -m playwright install chromium
+    buildCommand: pip install -r requirements.txt
 
-    startCommand: PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright streamlit run app.py --server.port $PORT --server.address 0.0.0.0
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0
 
     envVars:
-      - key: PLAYWRIGHT_BROWSERS_PATH
-        value: /tmp/ms-playwright
       - key: DB_PATH
         value: /tmp/PriceWatchFlipkart.db
       - key: SMTP_HOST

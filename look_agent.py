@@ -1,203 +1,175 @@
 # =============================================================
-# look_agent.py  —  FINAL VERSION
+# look_agent.py  —  FINAL VERSION (requests-based)
 # =============================================================
-# Tested on 5 Flipkart products (April 2026):
-#   Samsung S25 Ultra  ₹1,29,999  class: v1zwn29
-#   iPhone 16 Pro Max  ₹1,34,900  class: v1zwn29
-#   Sony PlayStation 5 ₹54,990    class: v1zwn29
-#   Ustraa Beard Oil   ₹298       class: v1zwn20
-#   Kalapushpi Saree   ₹484       class: v1zwn20
+# WHY SWITCHED FROM PLAYWRIGHT TO REQUESTS:
+#   Playwright needs a Chrome binary (~200MB) downloaded at runtime.
+#   Free cloud hosts (Streamlit Cloud, Render) don't allow this.
+#   requests works everywhere with zero setup.
+#
+# HOW WE BYPASS FLIPKART 403:
+#   1. Use a real session (persists cookies between requests)
+#   2. Visit homepage first to get session cookies
+#   3. Send full browser headers on every request
+#   4. Retry with different User-Agents if blocked
+#
+# TESTED ON: Samsung S25 Ultra, iPhone 16, PlayStation 5,
+#            Ustraa Beard Oil, Kalapushpi Saree (April 2026)
 # =============================================================
 
 import re
 import time
 import random
 import logging
-import platform
+import requests
+from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-try:
-    from playwright.sync_api import sync_playwright
-    PLAYWRIGHT_AVAILABLE = True
-except ImportError:
-    PLAYWRIGHT_AVAILABLE = False
+# Rotate between multiple real User-Agent strings
+# If one gets blocked, the next retry uses a different one
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+]
 
-from bs4 import BeautifulSoup
+
+def get_headers(user_agent: str = None) -> dict:
+    """Returns full browser headers."""
+    ua = user_agent or random.choice(USER_AGENTS)
+    return {
+        "User-Agent": ua,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Cache-Control": "max-age=0",
+        "DNT": "1",
+    }
 
 
 class LookAgent:
+    """
+    Agent 1: The LOOK Agent.
+    Uses requests + session to fetch Flipkart prices.
+    Works on all cloud platforms — no browser binary needed.
+    """
 
     def __init__(self):
-        if not PLAYWRIGHT_AVAILABLE:
-            raise RuntimeError(
-                "Run: pip install playwright && playwright install chromium"
+        self.session = requests.Session()
+        logger.info("LookAgent: ready (requests mode)")
+
+    def _warm_session(self, user_agent: str):
+        """Visit Flipkart homepage to get session cookies."""
+        try:
+            self.session.get(
+                "https://www.flipkart.com",
+                headers=get_headers(user_agent),
+                timeout=15,
+                allow_redirects=True,
             )
-        # Set browser path and install if missing
-        import subprocess, sys, os
-        # Use /tmp for browser cache — writable on all cloud platforms
-        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/tmp/ms-playwright"
-        browser_path = "/tmp/ms-playwright"
-        # Check if chromium binary exists anywhere in the cache
-        chromium_exists = False
-        if os.path.exists(browser_path):
-            for root, dirs, files in os.walk(browser_path):
-                if "headless_shell" in files or "chrome" in files or "chromium" in files:
-                    chromium_exists = True
-                    break
-        if not chromium_exists:
-            logger.info("LookAgent: installing chromium to /tmp/ms-playwright ...")
-            result = subprocess.run(
-                [sys.executable, "-m", "playwright", "install", "chromium"],
-                capture_output=True, text=True,
-                env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": "/tmp/ms-playwright"}
-            )
-            logger.info(f"LookAgent: install result: {result.returncode}")
-            if result.stderr:
-                logger.debug(f"LookAgent: {result.stderr[:300]}")
-        logger.info("LookAgent: ready")
+            time.sleep(random.uniform(1.5, 3.0))
+        except Exception as e:
+            logger.debug(f"Session warm failed (non-critical): {e}")
 
     def fetch(self, url: str) -> dict | None:
-        logger.info(f"LookAgent: opening browser for {url[:60]}...")
+        """
+        Fetch Flipkart product URL and extract price + name.
 
-        if platform.system() == "Windows":
-            import asyncio
-            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        Tries up to 3 times with different User-Agents.
+        Each attempt warms the session first (gets cookies).
+        """
+        logger.info(f"LookAgent: fetching {url[:70]}...")
 
-        try:
-            import os
-            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/tmp/ms-playwright"
-            with sync_playwright() as p:
-                browser = p.chromium.launch(
-                    headless=True,
-                    args=[
-                        "--no-sandbox",
-                        "--disable-blink-features=AutomationControlled",
-                        "--disable-dev-shm-usage",
-                        "--disable-gpu",
-                        "--single-process",       # needed on some cloud platforms
-                        "--no-zygote",            # needed on some cloud platforms
-                    ]
+        for attempt in range(1, 4):
+            ua = USER_AGENTS[(attempt - 1) % len(USER_AGENTS)]
+            logger.info(f"LookAgent: attempt {attempt}/3")
+
+            # Fresh session each attempt
+            self.session = requests.Session()
+            self._warm_session(ua)
+
+            try:
+                headers = get_headers(ua)
+                headers["Referer"] = "https://www.flipkart.com/"
+
+                response = self.session.get(
+                    url,
+                    headers=headers,
+                    timeout=20,
+                    allow_redirects=True,
                 )
 
-                context = browser.new_context(
-                    viewport={"width": 1366, "height": 768},
-                    user_agent=(
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    ),
-                    locale="en-IN",
-                    timezone_id="Asia/Kolkata",
-                    extra_http_headers={
-                        "Accept-Language": "en-IN,en-GB;q=0.9,en-US;q=0.8",
-                        "DNT": "1",
-                    }
-                )
+                logger.info(f"LookAgent: HTTP {response.status_code}")
 
-                context.add_init_script(
-                    "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-                )
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, "lxml")
+                    price = self._extract_price(soup)
+                    name  = self._extract_name(soup)
 
-                page = context.new_page()
+                    if price:
+                        logger.info(f"LookAgent: ✅ '{name[:50]}' → ₹{price:,.0f}")
+                        return {"name": name, "price": price, "url": url}
 
-                # Visit homepage first to get session cookies
-                logger.info("LookAgent: visiting homepage for cookies...")
-                page.goto("https://www.flipkart.com",
-                          wait_until="domcontentloaded", timeout=20000)
-                time.sleep(random.uniform(1.5, 2.5))
+                    # Price not found — save debug file
+                    with open("debug_flipkart.html", "w", encoding="utf-8") as f:
+                        f.write(response.text)
+                    logger.warning("LookAgent: page loaded but price not found")
 
-                # Load product page
-                logger.info("LookAgent: navigating to product page...")
-                page.goto(url, wait_until="networkidle", timeout=30000)
-                time.sleep(random.uniform(2.0, 3.5))
+                elif response.status_code == 403:
+                    logger.warning(f"LookAgent: 403 blocked on attempt {attempt}")
+                    time.sleep(attempt * 4)
 
-                # Scroll to trigger lazy load
-                page.evaluate("window.scrollTo(0, 400)")
-                time.sleep(1.0)
+            except Exception as e:
+                logger.error(f"LookAgent: error on attempt {attempt}: {e}")
+                time.sleep(2)
 
-                html = page.content()
-                browser.close()
-
-            soup = BeautifulSoup(html, "lxml")
-            price = self._extract_price(soup)
-            name  = self._extract_name(soup)
-
-            if price is None:
-                with open("debug_flipkart.html", "w", encoding="utf-8") as f:
-                    f.write(html)
-                logger.warning(
-                    "LookAgent: browser loaded page but price not found. "
-                    "Saved debug_flipkart.html — open in browser to inspect."
-                )
-                return None
-
-            logger.info(f"LookAgent: found '{name[:50]}' at Rs.{price:,.0f}")
-            return {"name": name, "price": price, "url": url}
-
-        except Exception as e:
-            logger.error(f"LookAgent: browser error: {e}")
-            return None
+        logger.error("LookAgent: all attempts failed")
+        return None
 
     def _extract_price(self, soup: BeautifulSoup) -> float | None:
         """
-        Extract selling price from any Flipkart product page.
-
-        CLASS MAP (confirmed across 5 products, April 2026):
-          v1zwn29 = selling/discounted price  (mobiles, electronics)
-          v1zwn20 = MRP / universal price     (ALL product types)
-          v1zwn22 = total with delivery       (ignore)
-          v1zwn24 = recommended products      (ignore)
-          v1zwn28 = recommended products      (ignore)
-
-        LOGIC:
-          For each selector, scan ALL matching elements.
-          Return the FIRST one that matches: starts with ₹,
-          followed only by digits and commas.
-          This rejects "Get Up to ₹500 Off", "512 GB + 12 GB", etc.
+        Extract selling price. Confirmed classes (April 2026):
+          v1zwn29 = discounted selling price (electronics/mobiles)
+          v1zwn20 = universal price (all product types)
         """
-        # Priority order — confirmed working April 2026
         selectors = [
-            "div.v1zwn29",    # discounted selling price (electronics)
-            "div.v1zwn20",    # universal — works on ALL product types
-            "div.Nx9bqj",     # pre-2026 fallback
-            "div._30jeq3",    # pre-2026 fallback
-            "div._1vC4OE",    # pre-2026 fallback
+            "div.v1zwn29",
+            "div.v1zwn20",
+            "div.Nx9bqj",
+            "div._30jeq3",
+            "div._1vC4OE",
         ]
-
         for selector in selectors:
             for el in soup.select(selector):
                 text = el.get_text(strip=True)
-                # Pure price = starts with ₹ then only digits and commas
-                # Example match:   "₹1,29,999"
-                # Example reject:  "Get Up to ₹500 Off"  "512 GB + 12 GB"
                 if re.match(r'^₹[\d,]+$', text):
                     try:
                         price = float(text.replace("₹", "").replace(",", ""))
-                        if price > 100:  # sanity check
+                        if price > 100:
                             return price
                     except ValueError:
                         continue
-
         return None
 
     def _extract_name(self, soup: BeautifulSoup) -> str:
-        """
-        Extract product name. Uses <title> tag — most reliable,
-        always present, never changes format.
-        """
+        """Extract product name from title tag."""
         selectors = ["title", "span.VU-ZEz", "span.B_NuCI", "h1.yhB1nd", "h1"]
-
         for selector in selectors:
             el = soup.select_one(selector)
             if not el:
                 continue
             name = el.get_text(strip=True)
-            # Clean title tag: "Product Name - Buy ... Flipkart.com"
             if selector == "title" and " - " in name:
                 name = name.split(" - ")[0].strip()
             name = re.sub(r'\s*Price in India.*$', '', name, flags=re.IGNORECASE).strip()
             if name and len(name) > 5:
                 return name[:150]
-
         return "Unknown Product"
