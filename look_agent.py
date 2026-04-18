@@ -33,33 +33,29 @@ class LookAgent:
             raise RuntimeError(
                 "Run: pip install playwright && playwright install chromium"
             )
-        # Auto-install browser if missing (handles cloud deployments)
-        self._ensure_browser()
-        logger.info("LookAgent: ready")
-
-    def _ensure_browser(self):
-        """Install Chromium browser if not already installed."""
-        import subprocess
-        import sys
-        try:
-            from playwright.sync_api import sync_playwright
-            with sync_playwright() as p:
-                # Just check if browser exists by getting executable path
-                browser_path = p.chromium.executable_path
-                import os
-                if not os.path.exists(browser_path):
-                    raise FileNotFoundError
-            logger.debug("LookAgent: browser found")
-        except Exception:
-            logger.info("LookAgent: browser not found — installing chromium...")
+        # Set browser path and install if missing
+        import subprocess, sys, os
+        # Use /tmp for browser cache — writable on all cloud platforms
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/tmp/ms-playwright"
+        browser_path = "/tmp/ms-playwright"
+        # Check if chromium binary exists anywhere in the cache
+        chromium_exists = False
+        if os.path.exists(browser_path):
+            for root, dirs, files in os.walk(browser_path):
+                if "headless_shell" in files or "chrome" in files or "chromium" in files:
+                    chromium_exists = True
+                    break
+        if not chromium_exists:
+            logger.info("LookAgent: installing chromium to /tmp/ms-playwright ...")
             result = subprocess.run(
                 [sys.executable, "-m", "playwright", "install", "chromium"],
-                capture_output=True, text=True
+                capture_output=True, text=True,
+                env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": "/tmp/ms-playwright"}
             )
-            if result.returncode == 0:
-                logger.info("LookAgent: chromium installed successfully")
-            else:
-                logger.warning(f"LookAgent: browser install warning: {result.stderr[:200]}")
+            logger.info(f"LookAgent: install result: {result.returncode}")
+            if result.stderr:
+                logger.debug(f"LookAgent: {result.stderr[:300]}")
+        logger.info("LookAgent: ready")
 
     def fetch(self, url: str) -> dict | None:
         logger.info(f"LookAgent: opening browser for {url[:60]}...")
@@ -69,6 +65,8 @@ class LookAgent:
             asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
         try:
+            import os
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/tmp/ms-playwright"
             with sync_playwright() as p:
                 browser = p.chromium.launch(
                     headless=True,
@@ -77,6 +75,8 @@ class LookAgent:
                         "--disable-blink-features=AutomationControlled",
                         "--disable-dev-shm-usage",
                         "--disable-gpu",
+                        "--single-process",       # needed on some cloud platforms
+                        "--no-zygote",            # needed on some cloud platforms
                     ]
                 )
 
