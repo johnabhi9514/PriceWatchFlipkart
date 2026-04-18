@@ -33,7 +33,33 @@ class LookAgent:
             raise RuntimeError(
                 "Run: pip install playwright && playwright install chromium"
             )
+        # Auto-install browser if missing (handles cloud deployments)
+        self._ensure_browser()
         logger.info("LookAgent: ready")
+
+    def _ensure_browser(self):
+        """Install Chromium browser if not already installed."""
+        import subprocess
+        import sys
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                # Just check if browser exists by getting executable path
+                browser_path = p.chromium.executable_path
+                import os
+                if not os.path.exists(browser_path):
+                    raise FileNotFoundError
+            logger.debug("LookAgent: browser found")
+        except Exception:
+            logger.info("LookAgent: browser not found — installing chromium...")
+            result = subprocess.run(
+                [sys.executable, "-m", "playwright", "install", "chromium"],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0:
+                logger.info("LookAgent: chromium installed successfully")
+            else:
+                logger.warning(f"LookAgent: browser install warning: {result.stderr[:200]}")
 
     def fetch(self, url: str) -> dict | None:
         logger.info(f"LookAgent: opening browser for {url[:60]}...")
